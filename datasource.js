@@ -115,7 +115,7 @@ function (angular, _, sdk, dateMath, kbn) {
     });
   };
 
-  KairosDBDatasource.prototype._performMetricKeyLookup = function(metric) {
+  KairosDBDatasource.prototype._performMetricKeyLookup = function(metric, relativeStart) {
     if(!metric) { return this.q.when([]); }
 
     var options = {
@@ -127,6 +127,11 @@ function (angular, _, sdk, dateMath, kbn) {
         start_absolute: 0
       }
     };
+
+    if (relativeStart) {
+      delete options.data.start_absolute;
+      options.data.start_relative = this.convertToKairosInterval(relativeStart);
+    }
 
     return this.backendSrv.datasourceRequest(options).then(function(result) {
       if (!result.data) {
@@ -142,7 +147,7 @@ function (angular, _, sdk, dateMath, kbn) {
     });
   };
 
-  KairosDBDatasource.prototype._performMetricKeyValueLookup = function(metric, key, otherTags) {
+  KairosDBDatasource.prototype._performMetricKeyValueLookup = function(metric, key, otherTags, relativeStart) {
     metric = metric.trim();
     key = key.trim();
     if(!metric || !key) {
@@ -178,32 +183,16 @@ function (angular, _, sdk, dateMath, kbn) {
       }
     };
 
+    if (relativeStart) {
+      delete options.data.start_absolute;
+      options.data.start_relative = this.convertToKairosInterval(relativeStart);
+    }
+
     return this.backendSrv.datasourceRequest(options).then(function(result) {
       if (!result.data) {
         return this.q.when([]);
       }
       return result.data.queries[0].results[0].tags[key];
-    });
-  };
-
-  KairosDBDatasource.prototype.performTagSuggestQuery = function(metric) {
-    var options = {
-      url: this.url + '/api/v1/datapoints/query/tags',
-      method: 'POST',
-      data: {
-        metrics: [{ name: metric }],
-        cache_time: 0,
-        start_absolute: 0
-      }
-    };
-
-    return this.backendSrv.datasourceRequest(options).then(function(response) {
-      if (!response.data) {
-        return [];
-      }
-      else {
-        return response.data.queries[0].results[0];
-      }
     });
   };
 
@@ -225,8 +214,12 @@ function (angular, _, sdk, dateMath, kbn) {
     };
 
     var metrics_regex = /metrics\((.*)\)/;
-    var tag_names_regex = /tag_names\((.*)\)/;
-    var tag_values_regex = /tag_values\(([^,]*),\s*([^,]*)(?:,\s*)?(\w+\s*=.*)?\)/;
+    var tag_names_regex = /tag_names\(\s*(.*?)\s*\)/;
+    var tag_values_regex = /tag_values\(([^,]*),\s*([^,]*)(?:,\s*)?(\w+\s*=.*?)?\)/;
+    var start_relative_regex = /start_relative\(\s*(\d+(?:\.\d+)?[Mwdhmsy]s?)\s*\)/
+
+    var start_relative_match = interpolated.match(start_relative_regex);
+    var start_relative = start_relative_match && start_relative_match[1] || undefined;
 
     var metrics_query = interpolated.match(metrics_regex);
     if (metrics_query) {
@@ -235,12 +228,12 @@ function (angular, _, sdk, dateMath, kbn) {
 
     var tag_names_query = interpolated.match(tag_names_regex);
     if (tag_names_query) {
-      return this._performMetricKeyLookup(tag_names_query[1]).then(responseTransform);
+      return this._performMetricKeyLookup(tag_names_query[1], start_relative).then(responseTransform);
     }
 
     var tag_values_query = interpolated.match(tag_values_regex);
     if (tag_values_query) {
-      return this._performMetricKeyValueLookup(tag_values_query[1], tag_values_query[2], tag_values_query[3]).then(responseTransform);
+      return this._performMetricKeyValueLookup(tag_values_query[1], tag_values_query[2], tag_values_query[3], start_relative).then(responseTransform);
     }
 
     return this.q.when([]);
